@@ -3,12 +3,14 @@ package com.example.officewrite;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import org.fxmisc.richtext.InlineCssTextArea;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -16,12 +18,13 @@ import java.util.Properties;
 
 public class MainApp extends Application {
 
-    private HTMLEditor editor;
+    private InlineCssTextArea editor;
     private ToggleButton micBtn;
     private ComboBox<String> langCombo;
     private Recorder recorder;
     private WhisperService whisperService;
     private Properties settings;
+    private Label statusLabel;
 
     @Override
     public void start(Stage stage) throws Exception {
@@ -54,7 +57,7 @@ public class MainApp extends Application {
         title.setStyle("-fx-font-weight:bold; -fx-text-fill: white; -fx-font-size: 14px;");
 
         Button newBtn = new Button("New");
-        newBtn.setOnAction(e -> editor.setHtmlText("<p></p>"));
+        newBtn.setOnAction(e -> editor.clear());
 
         Button saveBtn = new Button("Save");
         saveBtn.setOnAction(e -> { /* implement save to docx/pdf later */ });
@@ -78,7 +81,7 @@ public class MainApp extends Application {
                 OCRService ocr = new OCRService();
                 new Thread(() -> {
                     String txt = ocr.extractText(file);
-                    Platform.runLater(() -> insertTextAtCursor(txt));
+                    Platform.runLater(() -> insertTextAtCaret(txt, "eng"));
                 }).start();
             }
         });
@@ -107,32 +110,39 @@ public class MainApp extends Application {
     }
 
     private Node createEditorPane() {
-        editor = new HTMLEditor();
-        editor.setHtmlText("<p>Yah sample document area hai. Yahan bol kar ya keyboard se likh kar aap text daal sakte hain.</p>");
-        return editor;
+        editor = new InlineCssTextArea();
+        editor.setWrapText(true);
+        editor.setStyle("-fx-font-family: 'Times New Roman'; -fx-font-size: 14px;");
+        editor.replaceText("Yah sample document area hai. Yahan bol kar ya keyboard se likh kar aap text daal sakte hain.\n");
+        ScrollPane sp = new ScrollPane(editor);
+        sp.setFitToWidth(true);
+        return sp;
     }
 
     private Node createStatusBar() {
         HBox bar = new HBox(8);
         bar.setPadding(new Insets(6));
-        Label status = new Label("Ready");
-        bar.getChildren().add(status);
+        statusLabel = new Label("Ready");
+        bar.getChildren().add(statusLabel);
         return bar;
     }
 
     private void startRecordingAndTranscribe() {
         micBtn.setText("🎤 On");
+        statusLabel.setText("Recording...");
         try {
             Path wavPath = recorder.startRecording(); // returns path where it will write
         } catch (Exception e) {
             e.printStackTrace();
             micBtn.setSelected(false);
             micBtn.setText("🎤 Off");
+            statusLabel.setText("Record failed: " + e.getMessage());
         }
     }
 
     private void stopRecordingAndTranscribe() {
         micBtn.setText("🎤 Off");
+        statusLabel.setText("Processing...");
         try {
             Path wav = recorder.stopRecordingAndGetFile();
             new Thread(() -> {
@@ -146,21 +156,28 @@ public class MainApp extends Application {
                         finalText = KrutiDevConverter.unicodeToKrutiDev(result);
                     }
                     final String textToInsert = finalText;
-                    Platform.runLater(() -> insertTextAtCursor(textToInsert));
+                    Platform.runLater(() -> {
+                        insertTextAtCaret(textToInsert, langFlag);
+                        statusLabel.setText("Ready");
+                    });
+                } else {
+                    Platform.runLater(() -> statusLabel.setText("No transcription produced"));
                 }
             }).start();
         } catch (Exception e) {
             e.printStackTrace();
+            statusLabel.setText("Transcription failed: " + e.getMessage());
         }
     }
 
-    private void insertTextAtCursor(String text) {
-        String prev = editor.getHtmlText();
-        editor.setHtmlText(prev + "<p>" + escapeHtml(text) + "</p>");
-    }
-
-    private String escapeHtml(String in){
-        return in.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br/>");
+    private void insertTextAtCaret(String text, String langFlag) {
+        int pos = editor.getCaretPosition();
+        editor.insertText(pos, text + "\n");
+        // apply font depending on langFlag
+        int start = pos;
+        int end = pos + text.length();
+        String style = ("hi".equals(langFlag)) ? "-fx-font-family: 'Kruti Dev 010'; -fx-font-size: 16px;" : "-fx-font-family: 'Times New Roman'; -fx-font-size: 14px;";
+        editor.setStyle(start, end, style);
     }
 
     private void configureShortcuts(Scene scene) {
